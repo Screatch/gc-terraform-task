@@ -12,7 +12,7 @@ resource "aws_key_pair" "deployer" {
 }
 
 resource "template_file" "user_data" {
-  template = "app_install.tpl"
+  template = "templates/app_install.tpl"
   vars {
     cluster = "apache2"
   }
