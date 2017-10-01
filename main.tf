@@ -12,10 +12,7 @@ resource "aws_key_pair" "deployer" {
 }
 
 resource "template_file" "user_data" {
-  template = "templates/app_install.tpl"
-  vars {
-    cluster = "apache2"
-  }
+  template = "${file("templates/app_install.tpl")}"
   lifecycle {
     create_before_destroy = true
   }
@@ -29,6 +26,30 @@ resource "aws_launch_configuration" "default" {
   user_data 		= "${template_file.user_data.rendered}"
 }
 
+resource "aws_db_subnet_group" "default" {
+  name       = "main"
+
+  # We are not creating subnets as they are created by default as well as with default VPC
+  subnet_ids = ["subnet-00d84267","subnet-6736913c","subnet-de533197"]
+
+  tags {
+    Name = "Default DB Subnet group"
+  }
+}
+
+resource "aws_db_instance" "default" {
+  allocated_storage    = 10
+  storage_type         = "gp2"
+  engine               = "postgres"
+  engine_version       = "9.5.7"
+  instance_class       = "db.t2.micro"
+  identifier           = "grabcad-test-app"
+  name                 = "grabcad_production"
+  username             = "grabcad"
+  password             = "verysecurepostgresqlpassword"
+  db_subnet_group_name = "${aws_db_subnet_group.default.name}"
+  skip_final_snapshot  = true
+}
 
 
 resource "aws_autoscaling_group" "default" {
@@ -36,12 +57,47 @@ resource "aws_autoscaling_group" "default" {
   name                      = "default-autoscaling-group"
   max_size                  = 2
   min_size                  = 0
-  desired_capacity					= 0
-  health_check_grace_period = 100
+  desired_capacity					= 1
+  health_check_grace_period = 400
   health_check_type         = "ELB"
+  load_balancers            = ["${aws_elb.default.name}"]
 	placement_group           = "${aws_placement_group.default.id}"
 	launch_configuration      = "${aws_launch_configuration.default.name}"
 	timeouts {
     delete = "5m"
 	}
+
+  tags = [
+    {
+      key                 = "deploy"
+      value               = "chef-solo"
+      propagate_at_launch = true
+    }
+  ]
 }
+
+resource "aws_elb" "default" {
+  name  = "web"
+  availability_zones = ["eu-west-1a", "eu-west-1b", "eu-west-1c"]
+
+  listener {
+    instance_port     = 80
+    instance_protocol = "http"
+    lb_port           = 80
+    lb_protocol       = "http"
+  }
+
+  health_check {
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+    timeout             = 3
+    target              = "HTTP:80/heartbeat"
+    interval            = 30
+  }
+
+  tags {
+    Name = "web-terraform-elb"
+  }
+
+}
+
